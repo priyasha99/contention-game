@@ -1,5 +1,7 @@
 # 🔒 Lock Wars — a multiplayer game that teaches contention
 
+![What is contention](contention-definition.png)
+
 Everyone is a **worker**. Each job's key maps (by hash) to one of **N shared locks**. To
 process a job you must grab the lock it needs, do the work (a few clicks = the critical
 section), then release it. Only one person can hold a given lock at a time — **everyone
