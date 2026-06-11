@@ -94,7 +94,21 @@
 
   <div id="gamePanel" class="hidden">
     <div id="locks" class="locks"></div>
-    <div id="actionArea" class="panel"></div>
+    <div id="actionArea" class="panel">
+      <div id="aGrab" class="hidden">
+        <div class="sub" style="text-align:center" id="grabHint"></div>
+        <button id="grabBtn" style="font-size:20px;padding:26px"></button>
+      </div>
+      <div id="aWork" class="hidden">
+        <div class="sub" style="text-align:center" id="workHint"></div>
+        <button id="workBtn" class="btn-work"></button>
+      </div>
+      <div id="aWait" class="hidden" style="text-align:center">
+        <div style="font-size:40px">⏳</div>
+        <div style="font-size:18px;font-weight:700;color:var(--bad)" id="waitTitle"></div>
+        <div style="color:var(--muted);margin-top:4px" id="waitSub"></div>
+      </div>
+    </div>
 
     <div class="panel">
       <div class="stats">
@@ -155,7 +169,16 @@ $("resetBtn").onclick = () => ws.send(JSON.stringify({ type: "reset" }));
 ["wpj","dur","shards"].forEach(id => $(id).addEventListener("change", () =>
   ws.send(JSON.stringify({ type: "settings", workPerJob: +$("wpj").value, duration: +$("dur").value, shards: +$("shards").value }))));
 
-const send = (type) => ws.send(JSON.stringify({ type }));
+const send = (type) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type })); };
+
+// Persistent action buttons — handlers attached ONCE so rapid taps are never
+// lost to a mid-tap DOM rebuild. Renders only update labels/visibility below.
+let optimisticWork = 0; // local snappiness; reconciled by server state
+$("grabBtn").addEventListener("click", () => send("request"));
+$("workBtn").addEventListener("click", () => {
+  optimisticWork++;
+  send("work");
+});
 
 function handle(m) {
   if (m.type === "joined") { myId = m.id; $("joinPanel").classList.add("hidden"); }
@@ -202,26 +225,27 @@ function renderGame(s) {
     return `<div class="${cls}"><div class="ln">Lock #${l.i+1}</div><div class="ls">${state}</div><div class="lq">${q}</div></div>`;
   }).join("");
 
-  // action area
-  const a = $("actionArea");
-  if (mine && mine.holdingShard != null) {
+  // action area — toggle persistent blocks + update labels only (no DOM rebuild)
+  const holding = mine && mine.holdingShard != null;
+  const waiting = mine && mine.queuePos >= 0;
+  show("aWork", holding);
+  show("aGrab", !!mine && !holding && !waiting);
+  show("aWait", waiting);
+  if (holding) {
+    // show the higher of server-confirmed and optimistic count for snappiness
+    const shown = Math.min(mine.workNeeded, Math.max(mine.workDone, optimisticWork));
     const left = mine.workNeeded - mine.workDone;
-    a.innerHTML = `<div style="text-align:center;color:var(--muted);font-size:13px">Holding Lock #${mine.holdingShard+1} — ${left} click(s) to finish this job</div>`;
-    const btn = document.createElement("button");
-    btn.className = "btn-work"; btn.textContent = `⚡ WORK  (${mine.workDone}/${mine.workNeeded})`;
-    btn.onclick = () => send("work");
-    a.appendChild(btn);
-  } else if (mine && mine.queuePos >= 0) {
-    a.innerHTML = `<div style="text-align:center"><div style="font-size:40px">⏳</div>
-      <div style="font-size:18px;font-weight:700;color:var(--bad)">BLOCKED on Lock #${mine.currentShard+1}</div>
-      <div style="color:var(--muted);margin-top:4px">You are #${mine.queuePos+1} in line. This wait is contention.</div></div>`;
-  } else if (mine) {
-    a.innerHTML = `<div style="text-align:center;color:var(--muted);font-size:13px">Your job's key maps to <b style="color:var(--accent)">Lock #${mine.currentShard+1}</b></div>`;
-    const btn = document.createElement("button");
-    btn.style.fontSize = "20px"; btn.style.padding = "26px";
-    btn.textContent = `🔓 GRAB LOCK #${mine.currentShard+1}`;
-    btn.onclick = () => send("request");
-    a.appendChild(btn);
+    $("workHint").textContent = `Holding Lock #${mine.holdingShard+1} — ${left} click(s) to finish this job`;
+    $("workBtn").textContent = `⚡ WORK  (${shown}/${mine.workNeeded})`;
+  } else {
+    optimisticWork = 0; // reset when not in a critical section
+  }
+  if (waiting) {
+    $("waitTitle").textContent = `BLOCKED on Lock #${mine.currentShard+1}`;
+    $("waitSub").textContent = `You are #${mine.queuePos+1} in line. This wait is contention.`;
+  } else if (mine && !holding) {
+    $("grabHint").innerHTML = `Your job's key maps to <b style="color:var(--accent)">Lock #${mine.currentShard+1}</b>`;
+    $("grabBtn").textContent = `🔓 GRAB LOCK #${mine.currentShard+1}`;
   }
 
   $("sJobs").textContent = mine ? mine.jobsDone : 0;

@@ -139,7 +139,12 @@ function publicState() {
     settings: { workPerJob: game.workPerJob, duration: game.duration, shards: game.shards },
   };
 }
-const pushState = () => broadcast(publicState());
+// Coalesced broadcasting: instead of sending state on every single action
+// (which floods the network once many workers run in parallel across shards),
+// we just mark the state dirty. A single steady loop flushes it at ~10fps,
+// so traffic stays constant no matter how many locks/workers are active.
+let dirty = false;
+const pushState = () => { dirty = true; };
 
 // ---------------------------------------------------------------------------
 // Lock mechanics (per shard)
@@ -210,8 +215,7 @@ function doWork(p) {
   if (p.workDone >= p.workNeeded) {
     p.jobsDone++;
     game.totalJobs++;
-    broadcast({ type: "event", text: `${p.name} finished a job and released Lock #${p.holdingShard + 1}.` });
-    release(p);
+    release(p); // no per-job broadcast — the leaderboard already shows counts
   } else {
     pushState();
   }
@@ -241,12 +245,7 @@ function startRound() {
   game.startTime = Date.now();
   game.endTime = game.startTime + game.duration * 1000;
 
-  clearInterval(tickTimer);
   clearInterval(sampleTimer);
-  tickTimer = setInterval(() => {
-    if (Date.now() >= game.endTime) endRound();
-    else pushState();
-  }, 250);
   sampleTimer = setInterval(() => {
     const elapsed = Math.round((Date.now() - game.startTime) / 1000);
     game.throughput.push({ t: elapsed, jobs: game.totalJobs - game.lastSampleJobs });
@@ -358,6 +357,23 @@ wss.on("connection", (ws) => {
     pushState();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Steady broadcast loop — one flush every 100ms (~10fps).
+// During a round we always send (timer + live wait counters tick down);
+// otherwise we only send when something changed. This keeps network traffic
+// flat regardless of how many workers are hammering locks in parallel.
+// ---------------------------------------------------------------------------
+setInterval(() => {
+  if (game.phase === "running" && Date.now() >= game.endTime) {
+    endRound();
+    return;
+  }
+  if (game.phase === "running" || dirty) {
+    dirty = false;
+    broadcast(publicState());
+  }
+}, 100);
 
 // ---------------------------------------------------------------------------
 // Boot
