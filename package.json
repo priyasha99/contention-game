@@ -1,0 +1,12 @@
+{
+  "name": "lock-wars",
+  "version": "1.0.0",
+  "description": "A multiplayer browser game that teaches contention: one shared lock, many workers, only one can work at a time.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
