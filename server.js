@@ -1,11 +1,16 @@
 // LOCK WARS — a multiplayer game that teaches contention.
 //
-// One shared lock. Many workers. Only one worker can hold the lock at a time.
-// Everyone else who wants it has to WAIT. Players feel blocking, head-of-line
-// stalls, and watch total throughput collapse as more people contend.
+// Workers race to process jobs, but each job's key maps (by hash) to one of N
+// shared locks, and only one worker can hold a given lock at a time. Everyone
+// else who needs that lock has to WAIT. Players feel blocking and head-of-line
+// stalls, and watch total throughput collapse under contention.
+//
+// THE DIAL: "shards" = how many locks the work is split across.
+//   shards = 1  -> one global lock, everyone fights (max contention)
+//   shards = 4  -> work spreads across 4 locks, ~4x less contention
+// Run the same players at 1 shard, then 4, and compare the end screens.
 //
 // Run:  npm install  &&  npm start
-// Then open the printed URL and share your LAN URL with your juniors.
 
 const http = require("http");
 const fs = require("fs");
@@ -16,14 +21,10 @@ const { WebSocketServer } = require("ws");
 const PORT = process.env.PORT || 3000;
 const CLIENT = fs.readFileSync(path.join(__dirname, "client.html"));
 
-// ---------------------------------------------------------------------------
-// HTTP server: just serves the single-page client.
-// ---------------------------------------------------------------------------
 const server = http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(CLIENT);
 });
-
 const wss = new WebSocketServer({ server });
 
 // ---------------------------------------------------------------------------
@@ -31,23 +32,35 @@ const wss = new WebSocketServer({ server });
 // ---------------------------------------------------------------------------
 const game = {
   phase: "lobby", // lobby | running | ended
-  players: new Map(), // id -> player
+  players: new Map(),
   hostId: null,
-  lockHolder: null, // id of player holding the lock, or null
-  queue: [], // ids waiting for the lock (FIFO)
-  workPerJob: 5, // clicks needed inside the critical section
-  duration: 60, // round length in seconds
-  maxHoldMs: 8000, // auto-release a stalled holder (timeout)
+  shards: 1, // number of locks (the dial)
+  locks: [], // [{ holder: id|null, queue: [ids], timer }]
+  workPerJob: 5,
+  duration: 60,
+  maxHoldMs: 8000,
   startTime: 0,
   endTime: 0,
   totalJobs: 0,
-  totalBlockedMs: 0, // sum of all time any worker spent blocked = contention cost
-  throughput: [], // [{t, jobs}] sampled per second for the live chart
-  holdTimer: null,
+  totalBlockedMs: 0,
+  throughput: [],
   lastSampleJobs: 0,
 };
 
 let nextId = 1;
+let tickTimer = null;
+let sampleTimer = null;
+
+function makeLocks(n) {
+  game.locks = [];
+  for (let i = 0; i < n; i++) game.locks.push({ holder: null, queue: [], timer: null });
+}
+makeLocks(game.shards);
+
+// each job's key hashes to a shard; we simulate that with a fresh random pick
+function assignShard() {
+  return Math.floor(Math.random() * game.shards);
+}
 
 function newPlayer(ws, name) {
   return {
@@ -57,27 +70,27 @@ function newPlayer(ws, name) {
     jobsDone: 0,
     blocked: false,
     waitStart: 0,
-    totalWait: 0, // ms this player spent blocked
+    totalWait: 0,
     workDone: 0,
     workNeeded: 0,
     holding: false,
+    currentShard: 0, // the lock this worker's current job needs
+    holdingShard: null,
   };
 }
 
 function broadcast(obj) {
   const msg = JSON.stringify(obj);
-  for (const p of game.players.values()) {
-    if (p.ws.readyState === 1) p.ws.send(msg);
-  }
+  for (const p of game.players.values()) if (p.ws.readyState === 1) p.ws.send(msg);
 }
 
 function publicState() {
   const now = Date.now();
-  const holder = game.lockHolder ? game.players.get(game.lockHolder) : null;
   const players = [...game.players.values()]
     .map((p) => {
-      // include in-progress wait for live display
       const liveWait = p.blocked ? p.totalWait + (now - p.waitStart) : p.totalWait;
+      let queuePos = -1;
+      if (p.blocked) queuePos = game.locks[p.currentShard].queue.indexOf(p.id);
       return {
         id: p.id,
         name: p.name,
@@ -85,7 +98,9 @@ function publicState() {
         blocked: p.blocked,
         holding: p.holding,
         waitMs: Math.round(liveWait),
-        queuePos: game.queue.indexOf(p.id), // -1 if not queued
+        currentShard: p.currentShard,
+        holdingShard: p.holdingShard,
+        queuePos,
         workDone: p.workDone,
         workNeeded: p.workNeeded,
       };
@@ -93,74 +108,79 @@ function publicState() {
     .sort((a, b) => b.jobsDone - a.jobsDone);
 
   let liveBlockedTotal = game.totalBlockedMs;
+  let blockedCount = 0;
   for (const p of game.players.values()) {
-    if (p.blocked) liveBlockedTotal += now - p.waitStart;
+    if (p.blocked) {
+      liveBlockedTotal += now - p.waitStart;
+      blockedCount++;
+    }
   }
 
+  const locks = game.locks.map((l, i) => {
+    const h = l.holder ? game.players.get(l.holder) : null;
+    return { i, holder: h ? { id: h.id, name: h.name } : null, queueLen: l.queue.length };
+  });
+
   const timeLeft =
-    game.phase === "running"
-      ? Math.max(0, Math.ceil((game.endTime - now) / 1000))
-      : game.phase === "ended"
-      ? 0
-      : game.duration;
+    game.phase === "running" ? Math.max(0, Math.ceil((game.endTime - now) / 1000))
+    : game.phase === "ended" ? 0 : game.duration;
 
   return {
     type: "state",
     phase: game.phase,
     hostId: game.hostId,
-    holder: holder ? { id: holder.id, name: holder.name } : null,
-    queueLength: game.queue.length,
-    blockedCount: game.queue.length,
+    locks,
+    blockedCount,
     players,
     totalJobs: game.totalJobs,
     totalBlockedMs: Math.round(liveBlockedTotal),
     throughput: game.throughput,
     timeLeft,
-    settings: { workPerJob: game.workPerJob, duration: game.duration },
+    settings: { workPerJob: game.workPerJob, duration: game.duration, shards: game.shards },
   };
 }
-
-function pushState() {
-  broadcast(publicState());
-}
+const pushState = () => broadcast(publicState());
 
 // ---------------------------------------------------------------------------
-// Lock mechanics
+// Lock mechanics (per shard)
 // ---------------------------------------------------------------------------
-function grant(p) {
+function grant(p, s) {
   if (p.blocked) {
     p.totalWait += Date.now() - p.waitStart;
     p.blocked = false;
   }
-  game.lockHolder = p.id;
+  const lock = game.locks[s];
+  lock.holder = p.id;
   p.holding = true;
+  p.holdingShard = s;
   p.workDone = 0;
   p.workNeeded = game.workPerJob;
 
-  clearTimeout(game.holdTimer);
-  game.holdTimer = setTimeout(() => {
-    // Held too long -> forced release (a stalled critical section blocks everyone).
-    if (game.lockHolder === p.id) {
-      broadcast({ type: "event", text: `${p.name} held the lock too long — forced release (timeout).` });
-      release(p, false);
+  clearTimeout(lock.timer);
+  lock.timer = setTimeout(() => {
+    if (lock.holder === p.id) {
+      broadcast({ type: "event", text: `${p.name} held Lock #${s + 1} too long — forced release (timeout).` });
+      release(p);
     }
   }, game.maxHoldMs);
 }
 
-function release(p, completed) {
-  if (game.lockHolder !== p.id) return;
+function release(p) {
+  const s = p.holdingShard;
+  if (s == null) return;
+  const lock = game.locks[s];
+  if (lock.holder !== p.id) return;
   p.holding = false;
-  p.workDone = 0;
-  p.workNeeded = 0;
-  game.lockHolder = null;
-  clearTimeout(game.holdTimer);
+  p.holdingShard = null;
+  lock.holder = null;
+  clearTimeout(lock.timer);
+  p.currentShard = assignShard(); // next job hashes to a new lock
 
-  // hand off to the next waiter (FIFO)
-  while (game.queue.length) {
-    const nextId = game.queue.shift();
-    const np = game.players.get(nextId);
+  while (lock.queue.length) {
+    const nid = lock.queue.shift();
+    const np = game.players.get(nid);
     if (np) {
-      grant(np);
+      grant(np, s);
       break;
     }
   }
@@ -169,27 +189,29 @@ function release(p, completed) {
 
 function requestLock(p) {
   if (game.phase !== "running") return;
-  if (game.lockHolder === p.id) return; // already holding
-  if (p.blocked) return; // already queued
-  if (game.lockHolder === null && game.queue.length === 0) {
-    grant(p);
+  if (p.holding || p.blocked) return;
+  const s = p.currentShard;
+  const lock = game.locks[s];
+  if (lock.holder === null && lock.queue.length === 0) {
+    grant(p, s);
   } else {
     p.blocked = true;
     p.waitStart = Date.now();
-    game.queue.push(p.id);
+    lock.queue.push(p.id);
   }
   pushState();
 }
 
 function doWork(p) {
-  if (game.phase !== "running") return;
-  if (game.lockHolder !== p.id) return; // can only work while holding the lock
+  if (game.phase !== "running" || !p.holding) return;
+  const lock = game.locks[p.holdingShard];
+  if (!lock || lock.holder !== p.id) return;
   p.workDone++;
   if (p.workDone >= p.workNeeded) {
     p.jobsDone++;
     game.totalJobs++;
-    broadcast({ type: "event", text: `${p.name} finished a job and released the lock.` });
-    release(p, true);
+    broadcast({ type: "event", text: `${p.name} finished a job and released Lock #${p.holdingShard + 1}.` });
+    release(p);
   } else {
     pushState();
   }
@@ -198,25 +220,23 @@ function doWork(p) {
 // ---------------------------------------------------------------------------
 // Round lifecycle
 // ---------------------------------------------------------------------------
-let tickTimer = null;
-let sampleTimer = null;
-
 function startRound() {
   if (game.phase === "running") return;
+  makeLocks(game.shards);
   game.phase = "running";
   game.totalJobs = 0;
   game.totalBlockedMs = 0;
   game.throughput = [];
   game.lastSampleJobs = 0;
-  game.lockHolder = null;
-  game.queue = [];
   for (const p of game.players.values()) {
     p.jobsDone = 0;
     p.blocked = false;
     p.totalWait = 0;
     p.holding = false;
+    p.holdingShard = null;
     p.workDone = 0;
     p.workNeeded = 0;
+    p.currentShard = assignShard();
   }
   game.startTime = Date.now();
   game.endTime = game.startTime + game.duration * 1000;
@@ -233,7 +253,7 @@ function startRound() {
     game.lastSampleJobs = game.totalJobs;
   }, 1000);
 
-  broadcast({ type: "event", text: "Round started! Grab the lock and process jobs." });
+  broadcast({ type: "event", text: `Round started with ${game.shards} lock(s)! Grab the lock your job needs.` });
   pushState();
 }
 
@@ -241,8 +261,7 @@ function endRound() {
   game.phase = "ended";
   clearInterval(tickTimer);
   clearInterval(sampleTimer);
-  clearTimeout(game.holdTimer);
-  // close out any in-progress blocked time
+  game.locks.forEach((l) => clearTimeout(l.timer));
   const now = Date.now();
   for (const p of game.players.values()) {
     if (p.blocked) {
@@ -250,10 +269,10 @@ function endRound() {
       p.blocked = false;
     }
     p.holding = false;
+    p.holdingShard = null;
   }
   game.totalBlockedMs = [...game.players.values()].reduce((s, p) => s + p.totalWait, 0);
-  game.lockHolder = null;
-  game.queue = [];
+  makeLocks(game.shards);
   pushState();
 }
 
@@ -261,9 +280,8 @@ function resetToLobby() {
   game.phase = "lobby";
   clearInterval(tickTimer);
   clearInterval(sampleTimer);
-  clearTimeout(game.holdTimer);
-  game.lockHolder = null;
-  game.queue = [];
+  game.locks.forEach((l) => clearTimeout(l.timer));
+  makeLocks(game.shards);
   game.totalJobs = 0;
   game.totalBlockedMs = 0;
   game.throughput = [];
@@ -272,12 +290,13 @@ function resetToLobby() {
     p.blocked = false;
     p.totalWait = 0;
     p.holding = false;
+    p.holdingShard = null;
   }
   pushState();
 }
 
 // ---------------------------------------------------------------------------
-// Connection handling
+// Connections
 // ---------------------------------------------------------------------------
 wss.on("connection", (ws) => {
   let player = null;
@@ -289,7 +308,6 @@ wss.on("connection", (ws) => {
     } catch {
       return;
     }
-
     switch (msg.type) {
       case "join": {
         player = newPlayer(ws, String(msg.name || "Worker").slice(0, 16));
@@ -316,6 +334,10 @@ wss.on("connection", (ws) => {
         if (player && player.id === game.hostId && game.phase === "lobby") {
           if (msg.workPerJob) game.workPerJob = Math.max(1, Math.min(20, msg.workPerJob | 0));
           if (msg.duration) game.duration = Math.max(15, Math.min(300, msg.duration | 0));
+          if (msg.shards) {
+            game.shards = Math.max(1, Math.min(8, msg.shards | 0));
+            makeLocks(game.shards);
+          }
           pushState();
         }
         break;
@@ -324,13 +346,11 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     if (!player) return;
-    const wasHolder = game.lockHolder === player.id;
+    if (player.holding) release(player);
+    game.locks.forEach((l) => {
+      l.queue = l.queue.filter((id) => id !== player.id);
+    });
     game.players.delete(player.id);
-    game.queue = game.queue.filter((id) => id !== player.id);
-    if (wasHolder) {
-      game.lockHolder = null;
-      release(player, false); // hand lock to next waiter
-    }
     if (game.hostId === player.id) {
       game.hostId = game.players.size ? [...game.players.keys()][0] : null;
     }

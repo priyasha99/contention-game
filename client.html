@@ -12,46 +12,40 @@
     --hold: #a78bfa;
   }
   * { box-sizing: border-box; }
-  body {
-    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: var(--bg); color: var(--text); -webkit-tap-highlight-color: transparent;
-  }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); -webkit-tap-highlight-color: transparent; }
   .wrap { max-width: 760px; margin: 0 auto; padding: 16px; }
   h1 { font-size: 24px; margin: 6px 0 2px; }
   .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
   label { display:block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-  input[type=text], input[type=number] {
-    width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--line);
-    background: var(--panel2); color: var(--text); font-size: 16px;
-  }
-  button {
-    border: none; border-radius: 12px; padding: 14px 18px; font-size: 16px; font-weight: 600;
+  input[type=text], input[type=number] { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--text); font-size: 16px; }
+  button { border: none; border-radius: 12px; padding: 14px 18px; font-size: 16px; font-weight: 600;
     color: #fff; background: var(--accent); cursor: pointer; width: 100%; margin-top: 10px;
-    transition: transform .05s, filter .1s; touch-action: manipulation;
-  }
+    transition: transform .05s, filter .1s; touch-action: manipulation; }
   button:active { transform: scale(.98); }
   button:disabled { filter: grayscale(.6) brightness(.6); cursor: not-allowed; }
-  .btn-grab { background: var(--accent); }
   .btn-work { background: var(--good); font-size: 26px; padding: 34px; }
   .btn-ghost { background: var(--panel2); border: 1px solid var(--line); }
   .row { display: flex; gap: 12px; }
   .row > * { flex: 1; }
   .hidden { display: none !important; }
 
-  .lockbanner {
-    text-align: center; padding: 18px; border-radius: 14px; margin-bottom: 14px;
-    font-size: 20px; font-weight: 700; border: 2px solid var(--line);
-  }
-  .lock-free { background: rgba(54,211,153,.12); border-color: var(--good); color: var(--good); }
-  .lock-held { background: rgba(167,139,250,.12); border-color: var(--hold); color: var(--hold); }
-  .lock-mine { background: rgba(54,211,153,.18); border-color: var(--good); color: var(--good); }
+  .locks { display: grid; gap: 10px; margin-bottom: 14px; }
+  .lockcard { border-radius: 12px; padding: 12px; text-align: center; border: 2px solid var(--line); background: var(--panel); }
+  .lockcard .ln { font-size: 12px; color: var(--muted); }
+  .lockcard .ls { font-size: 15px; font-weight: 700; margin-top: 4px; }
+  .lockcard .lq { font-size: 11px; color: var(--bad); margin-top: 3px; min-height: 14px; }
+  .l-free { border-color: var(--good); } .l-free .ls { color: var(--good); }
+  .l-held { border-color: var(--hold); } .l-held .ls { color: var(--hold); }
+  .l-mine { border-color: var(--good); background: rgba(54,211,153,.14); } .l-mine .ls { color: var(--good); }
+  .l-target { box-shadow: 0 0 0 2px var(--accent) inset; }
 
   .stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; }
   .stat { background: var(--panel2); border-radius: 12px; padding: 12px; text-align: center; }
   .stat .v { font-size: 24px; font-weight: 700; }
   .stat .l { font-size: 11px; color: var(--muted); margin-top: 2px; }
-
   .meter { height: 12px; background: var(--panel2); border-radius: 8px; overflow: hidden; margin-top: 8px; }
   .meter > div { height: 100%; width: 0%; background: var(--bad); transition: width .2s; }
 
@@ -63,7 +57,6 @@
   .tag-hold { background: rgba(167,139,250,.2); color: var(--hold); }
   .tag-wait { background: rgba(248,114,114,.18); color: var(--bad); }
   .tag-idle { background: var(--panel2); color: var(--muted); }
-
   #log { font-size: 12px; color: var(--muted); max-height: 90px; overflow-y: auto; }
   #log div { padding: 2px 0; }
   canvas { width: 100%; height: 120px; display:block; }
@@ -74,33 +67,33 @@
 <body>
 <div class="wrap">
   <h1>🔒 Lock Wars</h1>
-  <div class="sub">One lock. Many workers. Only one of you can work at a time — everyone else waits. That waiting <em>is</em> contention.</div>
+  <div class="sub">Each job's key maps to one shared lock. Only one worker can hold a lock at a time — everyone else waits. That waiting <em>is</em> contention.</div>
 
-  <!-- JOIN -->
   <div id="joinPanel" class="panel">
     <label>Your name</label>
     <input id="nameInput" type="text" maxlength="16" placeholder="e.g. Ananya" />
-    <button id="joinBtn" class="btn-grab">Join the room</button>
+    <button id="joinBtn">Join the room</button>
   </div>
 
-  <!-- LOBBY -->
   <div id="lobbyPanel" class="panel hidden">
     <h3 style="margin-top:0">Lobby</h3>
     <div id="lobbyPlayers"></div>
     <div id="hostSettings" class="hidden">
       <div class="row" style="margin-top:12px">
-        <div><label>Work per job (clicks in critical section)</label><input id="wpj" type="number" min="1" max="20" value="5"></div>
+        <div><label>Number of locks (shards)</label><input id="shards" type="number" min="1" max="8" value="1"></div>
+        <div><label>Work per job (critical section)</label><input id="wpj" type="number" min="1" max="20" value="5"></div>
+      </div>
+      <div class="row" style="margin-top:10px">
         <div><label>Round length (seconds)</label><input id="dur" type="number" min="15" max="300" value="60"></div>
       </div>
-      <button id="startBtn" class="btn-grab">▶ Start round</button>
+      <div class="sub" style="margin-top:8px">Tip: play a round at <b>1 lock</b>, then the same crew at <b>4 locks</b>, and compare the end screens.</div>
+      <button id="startBtn">▶ Start round</button>
     </div>
     <div id="waitHost" class="sub hidden" style="margin-top:12px">Waiting for the host to start…</div>
   </div>
 
-  <!-- GAME -->
   <div id="gamePanel" class="hidden">
-    <div id="lockBanner" class="lockbanner lock-free">Lock is FREE</div>
-
+    <div id="locks" class="locks"></div>
     <div id="actionArea" class="panel"></div>
 
     <div class="panel">
@@ -119,8 +112,7 @@
 
     <div class="panel">
       <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:6px">
-        <span>Room throughput (jobs completed per second)</span>
-        <span id="roomTotals"></span>
+        <span>Room throughput (jobs/second)</span><span id="roomTotals"></span>
       </div>
       <canvas id="chart" width="700" height="120"></canvas>
     </div>
@@ -132,7 +124,6 @@
     </div>
   </div>
 
-  <!-- ENDED -->
   <div id="endPanel" class="panel hidden">
     <h2 style="margin-top:0">🏁 Round over</h2>
     <div id="endSummary"></div>
@@ -147,7 +138,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-let ws, myId = null, hostId = null, lastState = null;
+let ws, myId = null;
 
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -157,52 +148,35 @@ function connect() {
 }
 connect();
 
-$("joinBtn").onclick = () => {
-  const name = $("nameInput").value.trim() || "Worker";
-  ws.send(JSON.stringify({ type: "join", name }));
-};
+$("joinBtn").onclick = () => ws.send(JSON.stringify({ type: "join", name: $("nameInput").value.trim() || "Worker" }));
 $("nameInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("joinBtn").click(); });
-$("startBtn").onclick = () => ws.send(JSON.stringify({
-  type: "start"
-}));
+$("startBtn").onclick = () => ws.send(JSON.stringify({ type: "start" }));
 $("resetBtn").onclick = () => ws.send(JSON.stringify({ type: "reset" }));
-["wpj","dur"].forEach(id => $(id).addEventListener("change", () => {
-  ws.send(JSON.stringify({ type: "settings", workPerJob: +$("wpj").value, duration: +$("dur").value }));
-}));
+["wpj","dur","shards"].forEach(id => $(id).addEventListener("change", () =>
+  ws.send(JSON.stringify({ type: "settings", workPerJob: +$("wpj").value, duration: +$("dur").value, shards: +$("shards").value }))));
 
-function send(type){ ws.send(JSON.stringify({ type })); }
+const send = (type) => ws.send(JSON.stringify({ type }));
 
 function handle(m) {
-  if (m.type === "joined") {
-    myId = m.id; hostId = m.hostId;
-    $("joinPanel").classList.add("hidden");
-  } else if (m.type === "event") {
-    log(m.text);
-  } else if (m.type === "state") {
-    lastState = m; hostId = m.hostId; render(m);
-  }
+  if (m.type === "joined") { myId = m.id; $("joinPanel").classList.add("hidden"); }
+  else if (m.type === "event") log(m.text);
+  else if (m.type === "state") render(m);
 }
-
-function log(t) {
-  const d = document.createElement("div");
-  d.textContent = "• " + t;
-  $("log").prepend(d);
-}
-
+function log(t) { const d = document.createElement("div"); d.textContent = "• " + t; $("log").prepend(d); }
 function fmt(ms){ return (ms/1000).toFixed(1) + "s"; }
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 function render(s) {
   const isHost = myId === s.hostId;
   show("lobbyPanel", s.phase === "lobby" && myId);
   show("gamePanel", s.phase === "running");
   show("endPanel", s.phase === "ended");
-
   if (s.phase === "lobby") renderLobby(s, isHost);
   if (s.phase === "running") renderGame(s);
   if (s.phase === "ended") renderEnd(s, isHost);
 }
-
 function show(id, on){ $(id).classList.toggle("hidden", !on); }
+const me = (s) => s.players.find(p => p.id === myId);
 
 function renderLobby(s, isHost) {
   $("lobbyPlayers").innerHTML = "<b>" + s.players.length + " worker(s):</b> " +
@@ -211,109 +185,101 @@ function renderLobby(s, isHost) {
   show("waitHost", !isHost);
 }
 
-function me(s){ return s.players.find(p => p.id === myId); }
-
 function renderGame(s) {
   const mine = me(s);
-  // lock banner
-  const b = $("lockBanner");
-  if (s.holder && s.holder.id === myId) {
-    b.className = "lockbanner lock-mine"; b.textContent = "🟢 YOU hold the lock — finish your job!";
-  } else if (s.holder) {
-    b.className = "lockbanner lock-held"; b.textContent = `🔒 ${esc(s.holder.name)} holds the lock`;
-  } else {
-    b.className = "lockbanner lock-free"; b.textContent = "Lock is FREE — grab it!";
-  }
+  const target = mine ? (mine.holdingShard != null ? mine.holdingShard : mine.currentShard) : -1;
+
+  // lock cards
+  const cols = Math.min(s.locks.length, 4);
+  const lc = $("locks"); lc.style.gridTemplateColumns = `repeat(${cols},1fr)`;
+  lc.innerHTML = s.locks.map(l => {
+    let cls = "lockcard ", state;
+    if (l.holder && l.holder.id === myId) { cls += "l-mine"; state = "YOU"; }
+    else if (l.holder) { cls += "l-held"; state = esc(l.holder.name); }
+    else { cls += "l-free"; state = "FREE"; }
+    if (l.i === target) cls += " l-target";
+    const q = l.queueLen ? `${l.queueLen} waiting` : "";
+    return `<div class="${cls}"><div class="ln">Lock #${l.i+1}</div><div class="ls">${state}</div><div class="lq">${q}</div></div>`;
+  }).join("");
 
   // action area
   const a = $("actionArea");
-  if (s.holder && s.holder.id === myId && mine) {
+  if (mine && mine.holdingShard != null) {
     const left = mine.workNeeded - mine.workDone;
-    a.innerHTML = `<div style="text-align:center;color:var(--muted);font-size:13px">Click to do work — ${left} click(s) left in this critical section</div>`;
+    a.innerHTML = `<div style="text-align:center;color:var(--muted);font-size:13px">Holding Lock #${mine.holdingShard+1} — ${left} click(s) to finish this job</div>`;
     const btn = document.createElement("button");
     btn.className = "btn-work"; btn.textContent = `⚡ WORK  (${mine.workDone}/${mine.workNeeded})`;
     btn.onclick = () => send("work");
     a.appendChild(btn);
   } else if (mine && mine.queuePos >= 0) {
     a.innerHTML = `<div style="text-align:center"><div style="font-size:40px">⏳</div>
-      <div style="font-size:18px;font-weight:700;color:var(--bad)">BLOCKED — waiting in queue</div>
+      <div style="font-size:18px;font-weight:700;color:var(--bad)">BLOCKED on Lock #${mine.currentShard+1}</div>
       <div style="color:var(--muted);margin-top:4px">You are #${mine.queuePos+1} in line. This wait is contention.</div></div>`;
-  } else {
-    a.innerHTML = "";
+  } else if (mine) {
+    a.innerHTML = `<div style="text-align:center;color:var(--muted);font-size:13px">Your job's key maps to <b style="color:var(--accent)">Lock #${mine.currentShard+1}</b></div>`;
     const btn = document.createElement("button");
-    btn.className = "btn-grab"; btn.style.fontSize = "20px"; btn.style.padding = "26px";
-    btn.textContent = "🔓 GRAB THE LOCK";
+    btn.style.fontSize = "20px"; btn.style.padding = "26px";
+    btn.textContent = `🔓 GRAB LOCK #${mine.currentShard+1}`;
     btn.onclick = () => send("request");
     a.appendChild(btn);
   }
 
-  // stats
   $("sJobs").textContent = mine ? mine.jobsDone : 0;
   $("sWait").textContent = mine ? fmt(mine.waitMs) : "0.0s";
   $("sTime").textContent = s.timeLeft;
-  const blocked = s.blockedCount;
-  $("blockedTxt").textContent = blocked + " / " + s.players.length;
-  $("blockedMeter").style.width = (s.players.length ? (blocked/s.players.length*100) : 0) + "%";
-  $("roomTotals").textContent = `${s.totalJobs} jobs · ${fmt(s.totalBlockedMs)} total blocked`;
+  $("blockedTxt").textContent = s.blockedCount + " / " + s.players.length;
+  $("blockedMeter").style.width = (s.players.length ? (s.blockedCount/s.players.length*100) : 0) + "%";
+  $("roomTotals").textContent = `${s.totalJobs} jobs · ${fmt(s.totalBlockedMs)} blocked · ${s.settings.shards} lock(s)`;
 
-  renderBoard(s);
+  $("board").innerHTML = s.players.map((p,i) => {
+    let tag = '<span class="tag tag-idle">idle</span>';
+    if (p.holding) tag = `<span class="tag tag-hold">Lock #${p.holdingShard+1} 🔒</span>`;
+    else if (p.queuePos >= 0) tag = `<span class="tag tag-wait">blocked ⏳</span>`;
+    return `<tr class="${p.id===myId?'me':''}"><td>${i+1}</td><td>${esc(p.name)}</td><td>${p.jobsDone}</td><td>${fmt(p.waitMs)}</td><td>${tag}</td></tr>`;
+  }).join("");
+
   drawChart(s.throughput);
 }
 
-function renderBoard(s) {
-  $("board").innerHTML = s.players.map((p,i) => {
-    let tag = '<span class="tag tag-idle">idle</span>';
-    if (p.holding) tag = '<span class="tag tag-hold">holding 🔒</span>';
-    else if (p.queuePos >= 0) tag = '<span class="tag tag-wait">blocked ⏳</span>';
-    const meClass = p.id === myId ? "me" : "";
-    return `<tr class="${meClass}"><td>${i+1}</td><td>${esc(p.name)}</td><td>${p.jobsDone}</td><td>${fmt(p.waitMs)}</td><td>${tag}</td></tr>`;
-  }).join("");
-}
-
 function drawChart(data) {
-  const c = $("chart"), ctx = c.getContext("2d");
-  const W = c.width, H = c.height;
+  const c = $("chart"), ctx = c.getContext("2d"), W = c.width, H = c.height;
   ctx.clearRect(0,0,W,H);
   if (!data.length) return;
   const max = Math.max(1, ...data.map(d => d.jobs));
   const bw = W / Math.max(20, data.length);
   ctx.fillStyle = "#5b8cff";
-  data.forEach((d,i) => {
-    const h = (d.jobs / max) * (H - 20);
-    ctx.fillRect(i*bw, H - h, bw-2, h);
-  });
+  data.forEach((d,i) => { const h = (d.jobs/max)*(H-20); ctx.fillRect(i*bw, H-h, bw-2, h); });
   ctx.fillStyle = "#9aa0b0"; ctx.font = "11px sans-serif";
   ctx.fillText("peak: " + max + " jobs/s", 4, 12);
 }
 
 function renderEnd(s, isHost) {
   const winner = s.players[0];
-  const dur = s.settings.duration;
+  const dur = s.settings.duration, shards = s.settings.shards;
   const tput = (s.totalJobs / dur).toFixed(2);
-  const workerSecsBlocked = (s.totalBlockedMs/1000).toFixed(1);
-  // efficiency: of all worker-time, how much was spent NOT blocked
+  const blockedSecs = (s.totalBlockedMs/1000).toFixed(1);
   const totalWorkerSecs = s.players.length * dur;
   const wastedPct = totalWorkerSecs ? Math.round(s.totalBlockedMs/1000 / totalWorkerSecs * 100) : 0;
 
   $("endSummary").innerHTML = `
-    <p>🏆 <b>${winner ? esc(winner.name) : "—"}</b> processed the most jobs (${winner ? winner.jobsDone : 0}).</p>
+    <p>🏆 <b>${winner ? esc(winner.name) : "—"}</b> processed the most jobs (${winner ? winner.jobsDone : 0}) across <b>${shards} lock(s)</b>.</p>
     <div class="stats" style="margin:12px 0">
-      <div class="stat"><div class="v">${s.totalJobs}</div><div class="l">Total jobs (whole team)</div></div>
+      <div class="stat"><div class="v">${s.totalJobs}</div><div class="l">Total jobs</div></div>
       <div class="stat"><div class="v">${tput}</div><div class="l">Jobs / second</div></div>
-      <div class="stat"><div class="v">${workerSecsBlocked}s</div><div class="l">Total time blocked</div></div>
+      <div class="stat"><div class="v">${blockedSecs}s</div><div class="l">Total time blocked</div></div>
     </div>
     <table style="margin-bottom:12px"><thead><tr><th>#</th><th>Worker</th><th>Jobs</th><th>Time blocked</th></tr></thead><tbody>
     ${s.players.map((p,i)=>`<tr class="${p.id===myId?'me':''}"><td>${i+1}</td><td>${esc(p.name)}</td><td>${p.jobsDone}</td><td>${fmt(p.waitMs)}</td></tr>`).join("")}
     </tbody></table>
     <div class="takeaway">
-      <b>What you just felt = contention.</b><br>
-      With ${s.players.length} worker(s) sharing one lock, your team spent <b>${workerSecsBlocked} worker-seconds</b> doing nothing but waiting — about <b>${wastedPct}%</b> of all available worker time was burned blocking.<br><br>
-      Notice: adding more workers did <i>not</i> raise throughput much, because the single lock serializes everyone. That's why real systems shard locks, shrink critical sections, or go lock-free. Run it again with more people, or set "work per job" higher (longer critical section) and watch waiting explode.
+      <b>${shards === 1 ? "This was max contention: one global lock." : `You sharded the lock into ${shards} partitions.`}</b><br>
+      With ${s.players.length} worker(s), the team burned <b>${blockedSecs} worker-seconds</b> blocked — about <b>${wastedPct}%</b> of all worker time.<br><br>
+      ${shards === 1
+        ? "Now run the <i>same</i> crew with the lock split into 2 or 4 shards. Jobs spread across locks by hash, so fewer workers collide — watch this blocked time drop and throughput rise. That's lock striping (how ConcurrentHashMap scales)."
+        : "Compare this to your 1-lock round: same players, but splitting the lock cut how often workers collided. Push shards even higher and contention keeps falling — until work no longer distributes evenly across shards (a hot key), which is where sharding stops helping."}
     </div>`;
   show("hostReset", isHost);
 }
-
-function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 </script>
 </body>
 </html>
